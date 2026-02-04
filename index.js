@@ -415,6 +415,36 @@ async function run() {
       res.send(result || { cartItems: [] });
     });
 
+    //!
+    // ব্যাকএন্ডে অবশ্যই /inventory থাকতে হবে
+    app.patch("/inventory/:id", async (req, res) => {
+      const id = req.params.id;
+      const { stockDecrement } = req.body;
+
+      try {
+        const query = { _id: new ObjectId(id) };
+
+        // $inc ব্যবহার করে সরাসরি ডাটাবেজে স্টক কমানো
+        const result = await productsCollection.updateOne(
+          { ...query, stock: { $gte: Number(stockDecrement) } },
+          { $inc: { stock: -Math.abs(Number(stockDecrement)) } },
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(400).send({
+            success: false,
+            message: "Insufficient stock or invalid product ID.",
+          });
+        }
+
+        res.send({ success: true, message: "Stock updated!" });
+      } catch (error) {
+        res
+          .status(500)
+          .send({ success: false, message: "Internal Server Error" });
+      }
+    });
+
     // --- USERS SAVE ---
     app.post("/users", async (req, res) => {
       const user = req.body;
