@@ -415,42 +415,6 @@ async function run() {
       res.send(result || { cartItems: [] });
     });
 
-    app.post("/checkout", async (req, res) => {
-      const { cartItems } = req.body;
-
-      try {
-        // 1. Check stock for ALL items first
-        for (const item of cartItems) {
-          const product = await cartCollection.findOne({
-            _id: new ObjectId(item.id),
-          });
-          if (!product || product.stock < item.quantity) {
-            return res.status(400).send({
-              message: `Stock update failed for ${item.name}. Not enough items in stock.`,
-            });
-          }
-        }
-
-        // 2. Perform Atomic stock decrement
-        const updatePromises = cartItems.map((item) =>
-          cartCollection.updateOne(
-            { _id: new ObjectId(item.id) },
-            { $inc: { stock: -item.quantity } },
-          ),
-        );
-
-        await Promise.all(updatePromises);
-
-        // 3. Clear the user's cart after successful checkout
-        await cartCollection.deleteOne({ email: req.body.email });
-
-        res.send({ success: true, message: "Order placed successfully!" });
-      } catch (error) {
-        res
-          .status(500)
-          .send({ success: false, message: "Internal Server Error" });
-      }
-    });
     // --- USERS SAVE ---
     app.post("/users", async (req, res) => {
       const user = req.body;
