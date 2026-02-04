@@ -433,7 +433,7 @@ async function run() {
 
         // 2. Perform Atomic stock decrement
         const updatePromises = cartItems.map((item) =>
-          productCollection.updateOne(
+          cartCollection.updateOne(
             { _id: new ObjectId(item.id) },
             { $inc: { stock: -item.quantity } },
           ),
