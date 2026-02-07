@@ -425,6 +425,17 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
+    // (Admin Only Logic for delete user)
+    app.delete("/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await usersCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to delete user" });
+      }
+    });
 
     // index.js
 
