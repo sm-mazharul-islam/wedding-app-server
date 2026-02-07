@@ -431,9 +431,11 @@ async function run() {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const result = await usersCollection.deleteOne(query);
-        res.send(result);
+        res.status(200).send(result);
       } catch (error) {
-        res.status(500).send({ message: "Failed to delete user" });
+        res
+          .status(500)
+          .send({ success: false, message: "Internal Server Error" });
       }
     });
 
