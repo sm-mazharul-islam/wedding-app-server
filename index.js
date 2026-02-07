@@ -423,7 +423,15 @@ async function run() {
 
     //!
 
-    // --- USERS SAVE ---
+    // // --- USERS SAVE ---
+    // app.post("/users", async (req, res) => {
+    //   const user = req.body;
+    //   const existingUser = await usersCollection.findOne({ email: user.email });
+    //   if (existingUser) return res.send({ acknowledged: true });
+    //   const result = await usersCollection.insertOne(user);
+    //   res.send(result);
+    // });
+
     app.post("/users", async (req, res) => {
       const user = req.body;
       const existingUser = await usersCollection.findOne({ email: user.email });
