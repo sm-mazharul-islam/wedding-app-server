@@ -146,6 +146,12 @@ async function run() {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({ email: email });
+        if (!user) {
+          return res.status(404).send({
+            success: false,
+            message: "User not found", //
+          });
+        }
         res.send({ role: user?.role || "user" });
       } catch (error) {
         res.status(500).send({ error: "Role fetch failed" });
