@@ -425,12 +425,14 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
-    // (Admin Only Logic for delete user)
+    // ইউজার ডিলিট করার এপিআই (Admin Only)
     app.delete("/users/:id", async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const result = await usersCollection.deleteOne(query);
+
+        // JSON রেসপন্স নিশ্চিত করা
         res.status(200).send(result);
       } catch (error) {
         res
