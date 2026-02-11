@@ -31,9 +31,119 @@ async function run() {
     const cartCollection = database.collection("cart");
     const usersCollection = database.collection("users");
     const ordersCollection = database.collection("orders");
+    const biodataCollection = database.collection("biodata");
+    const unlockedCollection = database.collection("unlockPremium");
 
     console.log("Connected to MongoDB Successfully!");
 
+    // ১. আনলক ডাটা সেভ করার এপিআই
+    app.post("/unlock-premium", async (req, res) => {
+      try {
+        const {
+          userEmail,
+          biodataId,
+          biodataName,
+          biodataImage,
+          biodataAddress,
+        } = req.body;
+
+        if (!userEmail || !biodataId) {
+          return res
+            .status(400)
+            .send({ message: "Missing user email or biodata ID" });
+        }
+
+        // ডুপ্লিকেট চেক: ইউজার কি অলরেডি এটি আনলক করেছে?
+        const existing = await unlockedCollection.findOne({
+          userEmail: userEmail.toLowerCase(),
+          biodataId: biodataId,
+        });
+
+        if (existing) {
+          return res
+            .status(400)
+            .send({ message: "You have already unlocked this profile!" });
+        }
+
+        const unlockInfo = {
+          userEmail: userEmail.toLowerCase(),
+          biodataId,
+          biodataName,
+          biodataImage,
+          biodataAddress,
+          unlockDate: new Date(), // সার্ভার সাইড ডেট (Invalid Date ফিক্স)
+          status: "unlocked",
+        };
+
+        const result = await unlockedCollection.insertOne(unlockInfo);
+        res.status(200).send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Server error occurred" });
+      }
+    });
+
+    // ২. ড্যাশবোর্ডের জন্য হিস্ট্রি গেট করার এপিআই
+    app.get("/unlocked-requests/:email", async (req, res) => {
+      const email = req.params.email.toLowerCase();
+      const query = { userEmail: email };
+      const result = await unlockedCollection
+        .find(query)
+        .sort({ unlockDate: -1 })
+        .toArray();
+      res.send(result);
+    });
+
+    // ১. সব বায়োডাটা পড়ার রুট (FindYourMatch পেজের জন্য)
+    app.get("/biodata", async (req, res) => {
+      const result = await biodataCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/biodata/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        // ১. আইডি ভ্যালিড কিনা চেক করা (যাতে সার্ভার ক্রাশ না করে)
+        if (!ObjectId.isValid(id)) {
+          console.log("Invalid ID received:", id);
+          return res.status(400).send({ error: "Invalid ID format" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const result = await biodataCollection.findOne(query);
+
+        if (!result) {
+          return res.status(404).send({ error: "Biodata not found" });
+        }
+
+        res.send(result);
+      } catch (error) {
+        console.error("Internal Server Error:", error);
+        res.status(500).send({ error: "Server error" });
+      }
+    });
+
+    // ১. অ্যাডমিনের জন্য: সব আনলক করা বায়োডাটা দেখা
+    app.get("/all-unlocked-requests", async (req, res) => {
+      try {
+        const result = await unlockedCollection.find().toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching data" });
+      }
+    });
+
+    // ২. অ্যাডমিনের জন্য: প্রিমিয়াম অ্যাক্সেস ডিলিট করা
+    app.delete("/unlock-premium/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await unlockedCollection.deleteOne(query);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Error deleting data" });
+      }
+    });
     // --- DASHBOARD STATS ROUTE ---
     //!!
     app.get("/dashboard-stats/:email", async (req, res) => {
