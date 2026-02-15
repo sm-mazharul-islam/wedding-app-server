@@ -1,5 +1,3 @@
-//!
-
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
@@ -33,10 +31,41 @@ async function run() {
     const ordersCollection = database.collection("orders");
     const biodataCollection = database.collection("biodata");
     const unlockedCollection = database.collection("unlockPremium");
+    const bookingCollection = database.collection("bookings");
 
     console.log("Connected to MongoDB Successfully!");
 
-    // ১. আনলক ডাটা সেভ করার এপিআই
+    // নতুন বায়োডাটা তৈরি (Admin Only)
+    app.post("/biodata", async (req, res) => {
+      const data = req.body;
+      data.createdAt = new Date();
+      const result = await biodataCollection.insertOne(data);
+      res.send(result);
+    });
+
+    // biodata update(Admin Only)
+    app.put("/biodata/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const options = { upsert: true };
+      const updatedBiodata = { $set: req.body };
+      const result = await biodataCollection.updateOne(
+        filter,
+        updatedBiodata,
+        options,
+      );
+      res.send(result);
+    });
+
+    app.delete("/biodata/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await biodataCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    //
     app.post("/unlock-premium", async (req, res) => {
       try {
         const {
@@ -47,13 +76,20 @@ async function run() {
           biodataAddress,
         } = req.body;
 
-        if (!userEmail || !biodataId) {
+        //  Basic Validation
+        if (!userEmail || !biodataId || !userEmail.includes("@")) {
           return res
             .status(400)
-            .send({ message: "Missing user email or biodata ID" });
+            .send({ message: "Invalid request! Provide valid email and ID." });
         }
 
-        // ডুপ্লিকেট চেক: ইউজার কি অলরেডি এটি আনলক করেছে?
+        if (userEmail === "undefined" || userEmail === "null") {
+          return res
+            .status(401)
+            .send({ message: "Unauthorized! Please login first." });
+        }
+
+        //  Duplicate Check
         const existing = await unlockedCollection.findOne({
           userEmail: userEmail.toLowerCase(),
           biodataId: biodataId,
@@ -65,13 +101,14 @@ async function run() {
             .send({ message: "You have already unlocked this profile!" });
         }
 
+        //  Final Data Save
         const unlockInfo = {
           userEmail: userEmail.toLowerCase(),
           biodataId,
           biodataName,
           biodataImage,
           biodataAddress,
-          unlockDate: new Date(), // সার্ভার সাইড ডেট (Invalid Date ফিক্স)
+          unlockDate: new Date(), // Automatic server time
           status: "unlocked",
         };
 
@@ -82,7 +119,6 @@ async function run() {
       }
     });
 
-    // ২. ড্যাশবোর্ডের জন্য হিস্ট্রি গেট করার এপিআই
     app.get("/unlocked-requests/:email", async (req, res) => {
       const email = req.params.email.toLowerCase();
       const query = { userEmail: email };
@@ -93,19 +129,10 @@ async function run() {
       res.send(result);
     });
 
-    // ১. সব বায়োডাটা পড়ার রুট (FindYourMatch পেজের জন্য)
-    app.get("/biodata", async (req, res) => {
-      const result = await biodataCollection.find().toArray();
-      res.send(result);
-    });
-
     app.get("/biodata/:id", async (req, res) => {
       try {
         const id = req.params.id;
-
-        // ১. আইডি ভ্যালিড কিনা চেক করা (যাতে সার্ভার ক্রাশ না করে)
         if (!ObjectId.isValid(id)) {
-          console.log("Invalid ID received:", id);
           return res.status(400).send({ error: "Invalid ID format" });
         }
 
@@ -116,14 +143,45 @@ async function run() {
           return res.status(404).send({ error: "Biodata not found" });
         }
 
-        res.send(result);
+        const premiumCount = await unlockedCollection.countDocuments({
+          biodataId: id,
+        });
+
+        res.send({ ...result, premiumCount });
       } catch (error) {
-        console.error("Internal Server Error:", error);
         res.status(500).send({ error: "Server error" });
       }
     });
 
-    // ১. অ্যাডমিনের জন্য: সব আনলক করা বায়োডাটা দেখা
+    app.get("/biodata", async (req, res) => {
+      try {
+        const result = await biodataCollection
+          .aggregate([
+            {
+              $addFields: { stringId: { $toString: "$_id" } },
+            },
+            {
+              $lookup: {
+                from: "unlockPremium",
+                localField: "stringId",
+                foreignField: "biodataId",
+                as: "unlocks",
+              },
+            },
+            {
+              $addFields: { premiumCount: { $size: "$unlocks" } },
+            },
+            {
+              $project: { stringId: 0, unlocks: 0 },
+            },
+          ])
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to fetch aggregated biodata" });
+      }
+    });
+
     app.get("/all-unlocked-requests", async (req, res) => {
       try {
         const result = await unlockedCollection.find().toArray();
@@ -133,7 +191,6 @@ async function run() {
       }
     });
 
-    // ২. অ্যাডমিনের জন্য: প্রিমিয়াম অ্যাক্সেস ডিলিট করা
     app.delete("/unlock-premium/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -282,7 +339,7 @@ async function run() {
       const reviews = await reviewCollection.find({}).toArray();
       res.send(reviews);
     });
-    // রিভিউ ডিলিট করার রুট
+
     app.delete("/reviews/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -296,12 +353,9 @@ async function run() {
       res.send(result);
     });
 
-    // index.js
-
-    // রিভিউ পিন অথবা আনপিন করার রুট
     app.patch("/reviews/pin/:id", async (req, res) => {
       const id = req.params.id;
-      const status = req.body.isPinned; // true অথবা false আসবে
+      const status = req.body.isPinned;
       const filter = { _id: new ObjectId(id) };
       const updateDoc = {
         $set: { isPinned: status },
@@ -310,7 +364,6 @@ async function run() {
       res.send(result);
     });
 
-    // হোমপেজের জন্য শুধু পিন করা রিভিউগুলো পাওয়ার রুট
     app.get("/reviews/pinned", async (req, res) => {
       const query = { isPinned: true };
       const result = await reviewCollection.find(query).toArray();
@@ -318,11 +371,10 @@ async function run() {
     });
 
     // --- SERVICES & SHOP ROUTES ---
-    // index.js
+
     app.post("/servicesPackage", async (req, res) => {
       try {
         const newPackage = req.body;
-        // Ensure servicesPackageCollection is defined and connected
         const result = await servicesPackageCollection.insertOne(newPackage);
         res.send(result);
       } catch (error) {
@@ -351,10 +403,9 @@ async function run() {
         res.status(500).send({ error: "Server Error" });
       }
     });
-    // index.js
+
     app.patch("/servicesPackage/:id", async (req, res) => {
       const id = req.params.id;
-      // This check prevents the BSONError crash you saw earlier
       if (!id || id === "undefined" || id.length !== 24) {
         return res.status(400).send({ message: "Invalid ID format" });
       }
@@ -382,13 +433,6 @@ async function run() {
       }
     });
 
-    //     app.get("/weddingShop", async (req, res) => {
-    //       const query = {};
-    //       const options = await weddingShopDataCollection.find(query).toArray();
-    //       res.send(options);
-    //     });
-
-    // index.js
     app.post("/weddingShop", async (req, res) => {
       try {
         const newProduct = req.body;
@@ -413,7 +457,7 @@ async function run() {
       res.send(result);
     });
 
-    //শপ আইটেম আপডেট করা (PUT)
+    // (PUT)
     app.put("/weddingShop/:id", async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
@@ -433,7 +477,7 @@ async function run() {
     });
 
     // ------------------------------------------------
-    // 2. PUT Route: Update a package by ID
+    //  PUT Route: Update a package by ID
     // ------------------------------------------------
     app.put("/servicesPackage/:id", async (req, res) => {
       try {
@@ -461,9 +505,50 @@ async function run() {
       }
     });
 
+    app.post("/bookings", async (req, res) => {
+      const booking = req.body;
+      booking.status = "Pending";
+      booking.bookingDate = new Date();
+      const result = await bookingCollection.insertOne(booking);
+      res.send(result);
+    });
+
+    app.get("/my-bookings/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await bookingCollection
+        .find({ userEmail: email })
+        .toArray();
+      res.send(result);
+    });
+
+    app.get("/admin/all-bookings", async (req, res) => {
+      const result = await bookingCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.patch("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: { status: status },
+      };
+      const result = await bookingCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+
+    app.delete("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await bookingCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+    //----------------//
+
     app.get("/weddingShop/:id", async (req, res) => {
       try {
-        const id = req.params.id; // Correctly access the id parameter
+        const id = req.params.id;
         console.log("getting specific service", id);
 
         // Check if the id is a valid ObjectId
@@ -489,7 +574,7 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" }); // Handle any other errors
       }
     });
-    // index.js
+
     app.get("/weddingShop/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -531,17 +616,6 @@ async function run() {
       res.send(result || { cartItems: [] });
     });
 
-    //!
-
-    // // --- USERS SAVE ---
-    // app.post("/users", async (req, res) => {
-    //   const user = req.body;
-    //   const existingUser = await usersCollection.findOne({ email: user.email });
-    //   if (existingUser) return res.send({ acknowledged: true });
-    //   const result = await usersCollection.insertOne(user);
-    //   res.send(result);
-    // });
-
     app.post("/users", async (req, res) => {
       const user = req.body;
       const existingUser = await usersCollection.findOne({ email: user.email });
@@ -549,14 +623,13 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
-    // ইউজার ডিলিট করার এপিআই (Admin Only)
+    // (Admin Only)
     app.delete("/users/:id", async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const result = await usersCollection.deleteOne(query);
 
-        // JSON রেসপন্স নিশ্চিত করা
         res.status(200).send(result);
       } catch (error) {
         res
@@ -565,9 +638,6 @@ async function run() {
       }
     });
 
-    // index.js
-
-    // index.js
     app.get("/dashboard-stats/:email", async (req, res) => {
       try {
         const email = req.params.email;
@@ -617,10 +687,9 @@ async function run() {
     });
     app.get("/users", async (req, res) => {
       const result = await usersCollection.find().toArray();
-      res.send(result); // এটি JSON ডাটা পাঠাবে
+      res.send(result);
     });
 
-    // ইউজারের রোল আপডেট করার রুট
     app.patch("/users/role/:id", async (req, res) => {
       const id = req.params.id;
       const { role } = req.body;
